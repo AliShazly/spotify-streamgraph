@@ -109,6 +109,7 @@ document.getElementById('button').addEventListener('click', () => {
         return artistScore;
     });
     const keys = popularity.artists;
+    console.log(data, keys); // FIXME: keys array length changes with every call
 
     const svg = d3.select('svg');
     const width = +svg.attr('width');
