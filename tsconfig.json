@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "target": "ES6",
+    "module": "es6",
+    "rootDir": "./src",
+    "outDir": "./public",
+    "allowSyntheticDefaultImports": true,
+  }
+}

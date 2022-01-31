@@ -1,0 +1,19 @@
+#drop-area {
+    border: 2px dashed #ccc;
+    border-radius: 20px;
+    width: 480px;
+    height: 480px;
+    font-family: sans-serif;
+    cursor: pointer;
+}
+#drop-area.highlight {
+    border-color: purple;
+}
+#drop-input {
+    display: none;
+}
+#button {
+    margin-top: 10px;
+    width: 300px;
+    height: 50px;
+}
