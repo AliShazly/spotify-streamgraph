@@ -18,6 +18,10 @@ export class HashSet<T, U> {
         return this.map.has(this.hash_fn(value));
     }
 
+    get size(): number {
+        return this.map.size;
+    }
+
     iter(): IterableIterator<T> {
         return this.map.values();
     }

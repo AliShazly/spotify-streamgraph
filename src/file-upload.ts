@@ -1,5 +1,11 @@
 import { AppState, TrackData } from './app';
 
+enum FileType {
+    Extended,
+    Regular,
+    Invalid
+}
+
 export function initDropArea(state: AppState) {
     const dropArea = document.getElementById('drop-area');
     ['dragenter', 'dragover', 'dragleave', 'drop'].forEach((eventName) => {
@@ -20,24 +26,12 @@ export function initDropArea(state: AppState) {
                 const entry = item.webkitGetAsEntry();
                 if (entry.isDirectory) {
                     (entry as FileSystemDirectoryEntry).createReader().readEntries((entries) => {
-                        entries
-                            .filter((dirEntry) => filenameIsValid(dirEntry.name))
-                            .forEach((dirEntry) => {
-                                (dirEntry as FileSystemFileEntry).file((f) =>
-                                    readToString(f, state, (str) =>
-                                        rawJsonAsTrackData(str).forEach((track) => state.allTracks.add(track))
-                                    )
-                                );
-                            });
+                        entries.forEach((dirEntry) => {
+                            (dirEntry as FileSystemFileEntry).file((f) => ingestFile(f, state));
+                        });
                     });
                 } else if (entry.isFile) {
-                    if (filenameIsValid(entry.name)) {
-                        (entry as FileSystemFileEntry).file((f) => {
-                            readToString(f, state, (str) =>
-                                rawJsonAsTrackData(str).forEach((track) => state.allTracks.add(track))
-                            );
-                        });
-                    }
+                    (entry as FileSystemFileEntry).file((f) => ingestFile(f, state));
                 }
             });
         }
@@ -48,50 +42,93 @@ export function initDropArea(state: AppState) {
     dropInput.addEventListener('change', (e: Event) => {
         const files: FileList | null = (<HTMLInputElement>e.target).files;
         if (files != null) {
-            [...files].forEach((f) =>
-                readToString(f, state, (str) => rawJsonAsTrackData(str).forEach((track) => state.allTracks.add(track)))
-            );
+            [...files].forEach((f) => {
+                ingestFile(f, state);
+            });
         }
     });
 }
 
-function filenameIsValid(filename: string): boolean {
-    return filename.match(/^endsong_\d+\.json$/) != null || filename.match(/^StreamingHistory\d+\.json$/) != null;
+function checkFilename(filename: string): FileType {
+    if (filename.match(/^endsong_\d+\.json$/) != null) {
+        return FileType.Extended;
+    } else if (filename.match(/^StreamingHistory\d+\.json$/) != null) {
+        return FileType.Regular;
+    }
+    return FileType.Invalid;
 }
 
-function readToString(file: File, state: AppState, onloadend: (a: string) => void) {
+function ingestFile(file: File, state: AppState) {
+    let isExtended: boolean;
+    switch (checkFilename(file.name)) {
+        case FileType.Extended: {
+            isExtended = true;
+            break;
+        }
+        case FileType.Regular: {
+            isExtended = false;
+            break;
+        }
+        case FileType.Invalid:
+            return;
+    }
+    const trackSet = isExtended ? state.allExtTracks : state.allTracks;
+    const parseFn = isExtended ? parseExtTrackData : parseTrackData;
     const reader = new FileReader();
     state.readCount++;
     reader.onloadend = () => {
-        onloadend(reader.result as string);
+        parseFn(reader.result as string).forEach((track) => {
+            // on a timestamp collision, we increment by one second and try again
+            if (trackSet.has(track)) {
+                do {
+                    track.timestamp += 1;
+                } while (trackSet.has(track));
+            }
+            trackSet.add(track);
+        });
         state.readCount--;
     };
     reader.readAsText(file);
 }
 
-function rawJsonAsTrackData(jsonAsString: string): TrackData[] {
-    const parsed = JSON.parse(jsonAsString);
+// normal streaming history (StreamingHistoryN.json)
+function parseTrackData(rawJson: string): TrackData[] {
+    const parsed = JSON.parse(rawJson);
 
     const out: TrackData[] = [];
     parsed.forEach((elem) => {
-        // extended streaming history (endsong_N.json)
-        if (elem.ts) {
+        if (elem.endTime != null && elem.msPlayed != null && elem.trackName != null && elem.artistName != null) {
+            out.push({
+                timestamp: Date.parse(elem.endTime) - elem.msPlayed,
+                msPlayed: elem.msPlayed,
+                trackName: elem.trackName,
+                artistName: elem.artistName
+            } as TrackData);
+        }
+    });
+    return out;
+}
+
+// extended streaming history (endsong_N.json)
+function parseExtTrackData(rawJson: string): TrackData[] {
+    const parsed = JSON.parse(rawJson);
+
+    const out: TrackData[] = [];
+    parsed.forEach((elem) => {
+        if (
+            elem.ts != null &&
+            elem.ms_played != null &&
+            elem.master_metadata_album_album_name != null &&
+            elem.master_metadata_album_artist_name != null &&
+            elem.master_metadata_track_name != null
+        ) {
             out.push({
                 timestamp: Date.parse(elem.ts),
                 msPlayed: elem.ms_played,
                 trackName: elem.master_metadata_track_name,
                 artistName: elem.master_metadata_album_artist_name,
                 albumName: elem.master_metadata_album_album_name
-            });
-        }
-        // normal streaming history (StreamingHistoryN.json)
-        else if (elem.endTime) {
-            out.push({
-                timestamp: Date.parse(elem.endTime),
-                msPlayed: elem.msPlayed,
-                trackName: elem.trackName,
-                artistName: elem.artistName
-            });
+            } as TrackData);
         }
     });
     return out;
