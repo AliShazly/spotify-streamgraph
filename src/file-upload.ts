@@ -49,6 +49,7 @@ export function initDropArea(state: AppState) {
     });
 }
 
+// TODO: maybe validate content instead of relying on filename
 function checkFilename(filename: string): FileType {
     if (filename.match(/^endsong_\d+\.json$/) != null) {
         return FileType.Extended;
@@ -72,19 +73,13 @@ function ingestFile(file: File, state: AppState) {
         case FileType.Invalid:
             return;
     }
-    const trackSet = isExtended ? state.allExtTracks : state.allTracks;
+    const tracks = isExtended ? state.allExtTracks : state.allTracks;
     const parseFn = isExtended ? parseExtTrackData : parseTrackData;
     const reader = new FileReader();
     state.readCount++;
     reader.onloadend = () => {
         parseFn(reader.result as string).forEach((track) => {
-            // on a timestamp collision, we increment by one second and try again
-            if (trackSet.has(track)) {
-                do {
-                    track.timestamp += 1;
-                } while (trackSet.has(track));
-            }
-            trackSet.add(track);
+            tracks.push(track);
         });
         state.readCount--;
     };
@@ -97,13 +92,18 @@ function parseTrackData(rawJson: string): TrackData[] {
 
     const out: TrackData[] = [];
     parsed.forEach((elem) => {
-        if (elem.endTime != null && elem.msPlayed != null && elem.trackName != null && elem.artistName != null) {
+        if (
+            elem.endTime != null &&
+            elem.msPlayed != null &&
+            elem.trackName != null &&
+            elem.artistName != null
+        ) {
             out.push({
                 timestamp: Date.parse(elem.endTime) - elem.msPlayed,
                 msPlayed: elem.msPlayed,
                 trackName: elem.trackName,
                 artistName: elem.artistName
-            } as TrackData);
+            });
         }
     });
     return out;
@@ -123,12 +123,12 @@ function parseExtTrackData(rawJson: string): TrackData[] {
             elem.master_metadata_track_name != null
         ) {
             out.push({
-                timestamp: Date.parse(elem.ts),
+                timestamp: Date.parse(elem.ts) - elem.ms_played,
                 msPlayed: elem.ms_played,
                 trackName: elem.master_metadata_track_name,
                 artistName: elem.master_metadata_album_artist_name,
                 albumName: elem.master_metadata_album_album_name
-            } as TrackData);
+            });
         }
     });
     return out;
