@@ -17,7 +17,32 @@
     width: 300px;
     height: 50px;
 }
-
+#d3 {
+    position: relative;
+}
+#overlay {
+    position: absolute;
+    left: 0px;
+    top: 0px;
+}
+#zoomRect {
+    fill: white;
+    stroke: black;
+    opacity: 0.8;
+    pointer-events: none;
+}
+#selection {
+    stroke: black;
+    stroke-width: 1px;
+    pointer-events: none;
+}
+#mouseOverLine {
+    fill: white;
+    pointer-events: none;
+}
+#tooltip {
+    font-size: 24;
+}
 svg text {
     cursor: default;
     -webkit-user-select: none;
