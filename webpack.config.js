@@ -42,5 +42,5 @@ module.exports = {
             crateDirectory: __dirname
         })
     ],
-    experiments: { syncWebAssembly: true, topLevelAwait: true }
+    experiments: { asyncWebAssembly: true, topLevelAwait: true }
 };

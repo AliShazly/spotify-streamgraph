@@ -1,8 +1,6 @@
 import { AppState } from './app';
 import * as d3 from 'd3';
-import * as d3areaLabel from 'd3-area-label';
-
-const wasmRenderContext = await import('../pkg');
+import { WebglCtx } from '../pkg';
 
 const WIDTH = 1500;
 const HEIGHT = 500;
@@ -78,7 +76,6 @@ function color2hex(color: number[]): string {
 }
 
 function randColor(): string {
-    // return color2hex([...Array(3)].map(() => Math.random() * 255));
     return '#' + (0x1000000 + Math.random() * 0xffffff).toString(16).substring(1, 7);
 }
 
@@ -88,6 +85,14 @@ function clamp(val: number, min: number, max: number): number {
 
 function lerp(a: number, b: number, t: number): number {
     return (1 - t) * a + t * b;
+}
+
+function unpackRgba(color: number): number[] {
+    const r = (color >> 24) & 0xff;
+    const g = (color >> 16) & 0xff;
+    const b = (color >> 8) & 0xff;
+    const a = color & 0xff;
+    return [r, g, b, a];
 }
 
 export function drawGraph(state: AppState) {
@@ -130,15 +135,16 @@ export function drawGraph(state: AppState) {
         .attr('id', 'canvas')
         .attr('width', WIDTH)
         .attr('height', HEIGHT);
-    // const context = canvas.node().getContext('2d');
-    const offscreenCanvas = d3
-        .select('#d3')
+    const canvasCtx = new WebglCtx('canvas');
+
+    d3.select('#d3')
         .append('canvas')
         .style('display', 'none')
         .attr('id', 'offscreenCanvas')
         .attr('width', WIDTH)
         .attr('height', HEIGHT);
-    const offscreenContext = offscreenCanvas.node().getContext('2d');
+    const offscreenCtx = new WebglCtx('offscreenCanvas');
+
     const colorIdToKeyMap: Map<string, string> = new Map();
     const keyToColorIdMap: Map<string, string> = new Map();
     keys.forEach((key) => {
@@ -149,9 +155,6 @@ export function drawGraph(state: AppState) {
         keyToColorIdMap.set(key, color);
         colorIdToKeyMap.set(color, key);
     });
-
-    wasmRenderContext.webgl_init();
-    console.log('Initialized webgl rendering context');
 
     const stack = d3.stack().offset(d3.stackOffsetWiggle).order(d3.stackOrderInsideOut).keys(keys);
     const stackedData = stack(data);
@@ -173,7 +176,6 @@ export function drawGraph(state: AppState) {
         .domain(d3.extent(data, (d) => new Date(d.__timestamp)))
         .range([0, WIDTH]);
     const xAxis = d3.axisBottom(x).ticks(d3.timeYear.every(1));
-
     const y = d3
         .scaleLinear()
         .domain([
@@ -232,35 +234,11 @@ export function drawGraph(state: AppState) {
         const top: string = topLine.context(null)(d);
         const bot: string = bottomLine.context(null)(d);
         const color = node.attr('fill');
-        wasmRenderContext.add_area(top, bot, color);
+        canvasCtx.add_area(top, bot, color);
+        offscreenCtx.add_area(top, bot, keyToColorIdMap.get(d.key));
     });
     const t1 = performance.now();
-    console.log(`Triangulate took ${t1 - t0} milliseconds.`);
-
-    console.log('drawing............. :o');
-    const t00 = performance.now();
-    wasmRenderContext.draw();
-    const t11 = performance.now();
-    console.log(`draw took ${t11 - t00} milliseconds.`);
-
-    const drawCanvas = () => {
-        //FIXME:
-        // dataBinding.each(function (d: any) {
-        // const node = d3.select(this);
-        // context.beginPath();
-        // area.context(context)(<any>d);
-        // context.fillStyle = node.attr('fill');
-        // context.fill();
-        // });
-    };
-    const drawOffscreenCanvas = () => {
-        dataBinding.each(function (d: any) {
-            offscreenContext.beginPath();
-            area.context(offscreenContext)(<any>d);
-            offscreenContext.fillStyle = keyToColorIdMap.get(d.key);
-            offscreenContext.fill();
-        });
-    };
+    console.log(`triangulate took ${t1 - t0} milliseconds.`);
 
     const mouseOverLine = overlay
         .append('rect')
@@ -270,8 +248,6 @@ export function drawGraph(state: AppState) {
         .attr('width', OVERLAY_LINE_W)
         .attr('mask', 'url(#lineMask)');
     const lineMask = overlay.append('mask').attr('id', 'lineMask');
-
-    const labelsGrp = overlay.append('g').attr('id', 'labels');
 
     const zoomRect = overlay.append('rect').attr('id', 'zoomRect').attr('visibility', 'hidden');
 
@@ -288,21 +264,9 @@ export function drawGraph(state: AppState) {
         .attr('transform', `translate(0,${HEIGHT - 25})`)
         .call(xAxis);
 
-    const zoomCanvas = (
-        context: CanvasRenderingContext2D,
-        transform: d3.ZoomTransform,
-        drawFn: () => void
-    ) => {
-        context.clearRect(0, 0, WIDTH, HEIGHT);
-        context.save();
-        context.translate(transform.x, transform.y);
-        context.scale(transform.k, transform.k);
-        drawFn();
-        context.restore();
-    };
-
     const zoom = d3
         .zoom()
+        .filter(() => false) // no auto zoom / pan
         .scaleExtent([1, 10])
         .translateExtent([
             [0, 0],
@@ -311,61 +275,21 @@ export function drawGraph(state: AppState) {
         .on('start', () => {
             d3.selectAll('.areaLabel').remove();
         })
-        .filter(() => false) // no auto zoom / pan
         .on('zoom', ({ transform }) => {
             gX.call(xAxis.scale(transform.rescaleX(x)));
-            // zoomCanvas(context, transform, drawCanvas); //FIXME:
+
+            canvasCtx.set_transform(transform.x, transform.y, transform.k);
+            canvasCtx.draw();
+
             d3.selectAll('.selectedArea')
                 .attr('transform', transform)
                 .attr('stroke-width', SELECTION_STROKE_W / transform.k);
             mouseOverLine.attr('width', OVERLAY_LINE_W * transform.k);
         })
         .on('end', ({ transform }) => {
-            zoomCanvas(offscreenContext, transform, drawOffscreenCanvas);
-
-            // draw labels: FIXME:
-            // setTimeout(() => {
-            //     const tx = transform.invertX(0);
-            //     const tw = transform.invertX(WIDTH);
-            //     const ty = transform.invertY(0);
-            //     const th = transform.invertY(HEIGHT);
-            //     const zoomArea = d3
-            //         .area()
-            //         .x((d: any) => transform.applyX(clamp(x(d.data.__timestamp), tx, tw)))
-            //         .y0((d) => transform.applyY(clamp(y(d[0]), ty, th)))
-            //         .y1((d) => transform.applyY(clamp(y(d[1]), ty, th)));
-            //     // .curve(d3.curveBasis);
-            //     // only computing area labels for onscreen data
-            //     const imgData = offscreenContext.getImageData(0, 0, WIDTH, HEIGHT).data;
-            //     const onscreenKeys: Set<string> = new Set();
-            //     for (let i = 0; i < imgData.length; i += 4) {
-            //         const lookupColor = color2hex([...imgData.slice(i, i + 3)]);
-            //         const keyFromColor = colorIdToKeyMap.get(lookupColor);
-            //         onscreenKeys.add(keyFromColor);
-            //     }
-            //     const onscreenData = [...onscreenKeys]
-            //         .filter((k) => k != undefined)
-            //         .map((k) => dataLookup.get(k));
-
-            //     const res = onscreenData.length < 50 ? 2000 : 100;
-
-            //     labelsGrp
-            //         .selectAll('text')
-            //         .data(onscreenData)
-            //         .enter()
-            //         .append('text')
-            //         .classed('areaLabel', true)
-            //         .text((d) => d.key)
-            //         .attr(
-            //             'transform',
-            //             d3areaLabel
-            //                 .areaLabel(zoomArea)
-            //                 .interpolateResolution(res)
-            //                 .minHeight(2 * transform.k)
-            //         );
-            // }, 0);
+            offscreenCtx.set_transform(transform.x, transform.y, transform.k);
+            offscreenCtx.draw();
         });
-
     canvas.call(<any>zoom.transform, d3.zoomIdentity);
 
     let selectedKey: string | null = null;
@@ -426,8 +350,12 @@ export function drawGraph(state: AppState) {
                 mouseOverLine.attr('visibility', 'hidden');
                 d3.selectAll('.selectedArea').remove();
 
-                const offscreenColor = offscreenContext.getImageData(mouseX, mouseY, 1, 1).data;
-                const lookupColor = color2hex([...offscreenColor.slice(0, 3)]);
+                const lookupColor = color2hex(
+                    unpackRgba(
+                        offscreenCtx.get_pixel(Math.round(mouseX), Math.round(mouseY))
+                    ).slice(0, 3)
+                );
+
                 const keyFromColor = colorIdToKeyMap.get(lookupColor);
                 if (keyFromColor == selectedKey || keyFromColor == undefined) {
                     selectedKey = null;
@@ -470,7 +398,7 @@ export function drawGraph(state: AppState) {
             // else, perform zoom
             else {
                 // TODO: impl zooming when already zoomed in, based on curTransform
-                const scale = 1 / Math.min(zoomWidth / WIDTH, zoomHeight / HEIGHT);
+                const scale = 1 / ((zoomWidth * zoomHeight) / (WIDTH * HEIGHT));
                 const [svgCenterX, svgCenterY] = [WIDTH / 2, HEIGHT / 2];
                 const [zoomCenterX, zoomCenterY] = [zoomX + zoomWidth / 2, zoomY + zoomHeight / 2];
                 const [relX, relY] = [svgCenterX - zoomCenterX, svgCenterY - zoomCenterY];
@@ -487,7 +415,7 @@ export function drawGraph(state: AppState) {
                     .duration(1000)
                     .call(<any>zoom.transform, transform)
                     .on('end', () => {
-                        //TODO: force redraw of svg
+                        //TODO: force redraw of overlay (in firefox only?)
                     });
             }
         })

@@ -1,20 +1,13 @@
-#![feature(once_cell)]
+#![feature(vec_into_raw_parts)]
 #![allow(clippy::unused_unit)]
 
 mod triangulate;
 mod webgl;
 
-use std::lazy::SyncLazy;
-use std::sync::Mutex;
+use std::fmt::Display;
 use triangulate::gen_mesh;
 use wasm_bindgen::prelude::*;
 use webgl::WebglState;
-
-// wasm is single threaded for now, so it should be okay to fake send + sync
-unsafe impl Send for WebglState {}
-unsafe impl Sync for WebglState {}
-static STATE: SyncLazy<Mutex<WebglState>> =
-    SyncLazy::new(|| Mutex::new(WebglState::init("canvas").unwrap_or_else(|e| panic!("{}", e))));
 
 #[derive(Debug, Clone, Copy)]
 pub struct Point {
@@ -29,13 +22,6 @@ impl Point {
 pub type Line = [Point; 2];
 pub type Triangle = [Point; 3]; // should always have ccw winding
 
-#[derive(Debug, Clone, Copy)]
-pub enum Primitive {
-    Point(Point),
-    Line(Line),
-    Triangle(Triangle),
-}
-
 macro_rules! console_log {
     ($( $arg: expr ),*) => {
         web_sys::console::log_1(&JsValue::from_str(&format!("{}", format_args!($( $arg ),*) )))
@@ -46,12 +32,51 @@ pub(crate) use console_log;
 trait ToJsError<T> {
     fn to_jserr(self) -> Result<T, JsError>;
 }
-impl<T, E> ToJsError<T> for Result<T, E>
-where
-    E: std::fmt::Display,
-{
+impl<T, E: Display> ToJsError<T> for Result<T, E> {
     fn to_jserr(self) -> Result<T, JsError> {
         self.map_err(|err| JsError::new(&err.to_string()))
+    }
+}
+
+#[wasm_bindgen]
+pub struct WebglCtx {
+    internal: WebglState,
+}
+
+#[wasm_bindgen]
+impl WebglCtx {
+    #[wasm_bindgen(constructor)]
+    pub fn new(canvas_id: &str) -> Result<WebglCtx, JsError> {
+        let internal = WebglState::init(canvas_id).to_jserr()?;
+        Ok(WebglCtx { internal })
+    }
+
+    pub fn add_area(&mut self, top_line: &str, bot_line: &str, color: &str) -> Result<(), JsError> {
+        let rgba = csscolorparser::parse(color).to_jserr()?.rgba_u8();
+        let color_rgb = [rgba.0, rgba.1, rgba.2];
+        let (tris, lines) = gen_mesh(top_line, bot_line).to_jserr()?;
+        self.internal
+            .add_object(&tris, &lines, color_rgb)
+            .to_jserr()?;
+        Ok(())
+    }
+
+    pub fn draw(&self) -> Result<(), JsError> {
+        self.internal.draw_objects(false);
+        Ok(())
+    }
+
+    pub fn set_transform(&mut self, x: f32, y: f32, scale: f32) -> Result<(), JsError> {
+        self.internal.set_transform(x, y, scale);
+        Ok(())
+    }
+
+    pub fn get_pixel(&self, x: i32, y: i32) -> Result<u32, JsError> {
+        let pixels = self
+            .internal
+            .read_pixels(x, (self.internal.fb_height - 1) - y, 1, 1)
+            .to_jserr()?;
+        Ok(pack_rgba(pixels[0]))
     }
 }
 
@@ -60,29 +85,12 @@ pub fn wasm_init() {
     console_error_panic_hook::set_once();
 }
 
-#[wasm_bindgen]
-pub fn webgl_init() -> Result<(), JsValue> {
-    // only calling for the lazy value to be computed
-    #[allow(clippy::let_underscore_lock)]
-    let _ = STATE.lock().unwrap();
-
-    Ok(())
-}
-
-#[wasm_bindgen]
-pub fn add_area(top_line: &str, bot_line: &str, color: &str) -> Result<(), JsError> {
-    let rgba = csscolorparser::parse(color).to_jserr()?.rgba_u8();
-    let color_rgb = [rgba.0, rgba.1, rgba.2];
-    let (tris, lines) = gen_mesh(top_line, bot_line).to_jserr()?;
-    STATE
-        .lock()
-        .unwrap()
-        .add_object(tris, lines, color_rgb)
-        .to_jserr()?;
-    Ok(())
-}
-
-#[wasm_bindgen]
-pub fn draw() {
-    STATE.lock().unwrap().draw_objects();
+fn pack_rgba(rgba: [u8; 4]) -> u32 {
+    let (r, g, b, a) = (
+        rgba[0] as u32,
+        rgba[1] as u32,
+        rgba[2] as u32,
+        rgba[3] as u32,
+    );
+    r << 24 | g << 16 | b << 8 | a
 }

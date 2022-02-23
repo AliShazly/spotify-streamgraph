@@ -1,14 +1,17 @@
-use crate::console_log;
 use crate::{Line, Triangle};
-use wasm_bindgen::{JsCast, JsValue};
-use web_sys::{WebGl2RenderingContext as Gl, WebGlProgram, WebGlShader, WebGlVertexArrayObject};
+use cgmatrix as mat4;
+use wasm_bindgen::{JsCast, JsError, JsValue};
+use web_sys::{
+    HtmlCanvasElement, WebGl2RenderingContext as Gl, WebGlFramebuffer, WebGlProgram, WebGlShader,
+    WebGlVertexArrayObject,
+};
 
 // TODO:
-//  applyTransform()
+//  resizeFb()
 
-pub type Color = [u8; 3];
+type Color = [u8; 3];
 
-pub struct RenderableObject {
+struct RenderableObject {
     vao: WebGlVertexArrayObject,
     color: Color,
     draw_mode: u32,
@@ -18,7 +21,11 @@ pub struct RenderableObject {
 pub struct WebglState {
     context: Gl,
     program: WebGlProgram,
+    frame_buffer: WebGlFramebuffer,
     objects: Vec<RenderableObject>,
+    transform_matrix: mat4::Matrix44,
+    pub fb_width: i32,
+    pub fb_height: i32,
 }
 
 impl WebglState {
@@ -27,16 +34,15 @@ impl WebglState {
             e.as_string()
                 .unwrap_or_else(|| "Error retrieving webgl context".into())
         })?;
-        gl.enable(Gl::SAMPLE_COVERAGE);
 
         let vert_shader = compile_shader(
             &gl,
             Gl::VERTEX_SHADER,
             r##"#version 300 es
  
-        in vec2 position;
+        in vec2 a_position;
 
-        uniform vec2 u_resolution;
+        uniform mat4 u_matrix;
 
         // out vec3 randColor;
         // float rand(vec2 co) {
@@ -44,10 +50,8 @@ impl WebglState {
         // }
 
         void main() {
-            vec2 clipSpace = (((position / u_resolution) * 2.0) - 1.0) * vec2(1.0, -1.0);
-
-            gl_Position = vec4(clipSpace, 0.0, 1.0);
-            // randColor = vec3(rand(position.xx),rand(position.yx),rand(position.xy));
+            gl_Position = vec4(u_matrix * vec4(a_position, 0.0, 1.0));
+            // randColor = vec3(rand(a_position.xx),rand(a_position.yx),rand(a_position.xy));
         }
         "##,
         )?;
@@ -74,17 +78,60 @@ impl WebglState {
         let program = link_program(&gl, &vert_shader, &frag_shader)?;
         gl.use_program(Some(&program));
 
+        let (fb_width, fb_height) = (gl.drawing_buffer_width(), gl.drawing_buffer_height());
+
+        let render_buffer = gl
+            .create_renderbuffer()
+            .ok_or_else(|| String::from("Unable to create renderbuffer"))?;
+        let frame_buffer = gl
+            .create_framebuffer()
+            .ok_or_else(|| String::from("Unable to create framebuffer"))?;
+
+        let max_samples = gl
+            .get_parameter(Gl::MAX_SAMPLES)
+            .unwrap_or_else(|_| 4.into())
+            .as_f64()
+            .unwrap_or(4.) as i32;
+
+        gl.bind_renderbuffer(Gl::RENDERBUFFER, Some(&render_buffer));
+        gl.renderbuffer_storage_multisample(
+            Gl::RENDERBUFFER,
+            max_samples,
+            Gl::RGBA8,
+            fb_width,
+            fb_height,
+        );
+
+        gl.bind_framebuffer(Gl::FRAMEBUFFER, Some(&frame_buffer));
+        gl.framebuffer_renderbuffer(
+            Gl::FRAMEBUFFER,
+            Gl::COLOR_ATTACHMENT0,
+            Gl::RENDERBUFFER,
+            Some(&render_buffer),
+        );
+
+        if gl.check_framebuffer_status(Gl::FRAMEBUFFER) != Gl::FRAMEBUFFER_COMPLETE {
+            return Err("Incomplete framebuffer".into());
+        }
+
+        gl.bind_framebuffer(Gl::FRAMEBUFFER, None);
+        gl.bind_renderbuffer(Gl::RENDERBUFFER, None);
+
         Ok(Self {
             context: gl,
             program,
+            frame_buffer,
             objects: Vec::new(),
+            transform_matrix: proj_mat(fb_width as f32, fb_height as f32),
+            fb_width,
+            fb_height,
         })
     }
 
     pub fn add_object(
         &mut self,
-        triangles: Vec<Triangle>,
-        lines: Vec<Line>,
+        triangles: &[Triangle],
+        lines: &[Line],
         color: Color,
     ) -> Result<(), String> {
         let gl = &self.context;
@@ -105,7 +152,7 @@ impl WebglState {
                 .ok_or("Could not create vertex array object")?;
             gl.bind_vertex_array(Some(&vao));
 
-            let position_attr_loc = gl.get_attrib_location(&self.program, "position");
+            let position_attr_loc = gl.get_attrib_location(&self.program, "a_position");
 
             gl.vertex_attrib_pointer_with_i32(position_attr_loc as u32, 2, Gl::FLOAT, false, 0, 0);
 
@@ -134,39 +181,105 @@ impl WebglState {
                 length: flat_verts.len() / 2,
             });
         }
-
         Ok(())
     }
 
-    // https://www.khronos.org/registry/OpenGL-Refpages/gl4/html/glLineWidth.xhtml
-    //     "Line antialiasing is initially disabled."
-    pub fn draw_objects(&self) {
+    pub fn draw_objects(&self, draw_lines: bool) {
         let gl = &self.context;
 
-        gl.clear_color(0.0, 0.0, 0.0, 1.0);
-        gl.clear(Gl::COLOR_BUFFER_BIT | Gl::DEPTH_BUFFER_BIT);
-        let u_color = gl.get_uniform_location(&self.program, "u_objColor");
-        let u_resolution = gl.get_uniform_location(&self.program, "u_resolution");
-        gl.uniform2f(
-            u_resolution.as_ref(),
-            gl.drawing_buffer_width() as f32,
-            gl.drawing_buffer_height() as f32,
-        );
+        gl.bind_framebuffer(Gl::DRAW_FRAMEBUFFER, Some(&self.frame_buffer));
+        gl.clear_color(0.0, 0.0, 0.0, 0.0);
+        gl.clear(Gl::COLOR_BUFFER_BIT);
+        let u_obj_color = gl.get_uniform_location(&self.program, "u_objColor");
+        let u_matrix = gl.get_uniform_location(&self.program, "u_matrix");
+        gl.uniform_matrix4fv_with_f32_array(u_matrix.as_ref(), false, &self.transform_matrix);
 
-        for obj in &self.objects {
+        for obj in self.objects.iter() {
+            if !draw_lines && obj.draw_mode != Gl::TRIANGLES {
+                continue;
+            }
+
             let color = obj.color.map(|c| c as f32 / u8::MAX as f32);
             gl.bind_vertex_array(Some(&obj.vao));
-            gl.uniform3f(u_color.as_ref(), color[0], color[1], color[2]);
+            gl.uniform3f(u_obj_color.as_ref(), color[0], color[1], color[2]);
             gl.draw_arrays(obj.draw_mode, 0, obj.length as i32);
         }
+        gl.bind_framebuffer(Gl::DRAW_FRAMEBUFFER, None);
+        gl.bind_framebuffer(Gl::READ_FRAMEBUFFER, Some(&self.frame_buffer));
+        gl.blit_framebuffer(
+            0,
+            0,
+            self.fb_width,
+            self.fb_height,
+            0,
+            0,
+            self.fb_width,
+            self.fb_height,
+            Gl::COLOR_BUFFER_BIT,
+            Gl::LINEAR,
+        );
+        gl.bind_framebuffer(Gl::FRAMEBUFFER, None);
+    }
+
+    pub fn set_transform(&mut self, x: f32, y: f32, scale: f32) {
+        let nx = 2. * x / self.fb_width as f32 - 1.;
+        let ny = -2. * y / self.fb_height as f32 + 1.;
+        #[rustfmt::skip]
+        let transformation: mat4::Matrix44 = [
+            scale,  0.,     0.,     0.,
+            0.,     scale,  0.,     0.,
+            0.,     0.,     1.,     0.,
+            nx,     ny,     0.,     1.,
+        ];
+        let origin = mat4::matmul(
+            proj_mat(self.fb_width as f32, self.fb_height as f32),
+            mat4::translate(1., -1., 0.),
+        );
+        self.transform_matrix = mat4::matmul(origin, transformation);
+    }
+
+    pub fn read_pixels(&self, x: i32, y: i32, w: i32, h: i32) -> Result<Vec<[u8; 4]>, String> {
+        let gl = &self.context;
+        gl.bind_framebuffer(Gl::FRAMEBUFFER, None);
+
+        let n_pixels = (w * h) as usize;
+        let mut subpixels = vec![0u8; n_pixels * 4];
+        gl.read_pixels_with_opt_u8_array(
+            x,
+            y,
+            w,
+            h,
+            Gl::RGBA,
+            Gl::UNSIGNED_BYTE,
+            Some(subpixels.as_mut_slice()),
+        )
+        .map_err(|jsv| {
+            jsv.as_string()
+                .unwrap_or_else(|| String::from("Error reading pixels"))
+        })?;
+
+        Ok(subpixels
+            .chunks_exact(4)
+            .map(|px| px.try_into().unwrap())
+            .collect())
     }
 }
 
 fn get_webgl_context(canvas_id: &str) -> Result<Gl, JsValue> {
     let document = web_sys::window().unwrap().document().unwrap();
-    let canvas = document.get_element_by_id(canvas_id).unwrap();
-    let canvas: web_sys::HtmlCanvasElement = canvas.dyn_into::<web_sys::HtmlCanvasElement>()?;
-    Ok(canvas.get_context("webgl2")?.unwrap().dyn_into::<Gl>()?)
+    let canvas = document
+        .get_element_by_id(canvas_id)
+        .ok_or_else(|| JsError::new("Invalid canvas id"))?
+        .dyn_into::<HtmlCanvasElement>()?;
+
+    let ctx_options = js_sys::Object::new();
+    js_sys::Reflect::set(&ctx_options, &"antialias".into(), &false.into())?;
+    js_sys::Reflect::set(&ctx_options, &"preserveDrawingBuffer".into(), &true.into())?;
+
+    Ok(canvas
+        .get_context_with_context_options("webgl2", &ctx_options)?
+        .unwrap()
+        .dyn_into::<Gl>()?)
 }
 
 fn compile_shader(context: &Gl, shader_type: u32, source: &str) -> Result<WebGlShader, String> {
@@ -213,4 +326,8 @@ fn link_program(
             .get_program_info_log(&program)
             .unwrap_or_else(|| String::from("Unknown error creating program object")))
     }
+}
+
+fn proj_mat(w: f32, h: f32) -> mat4::Matrix44 {
+    mat4::orthogonal_matrix(0., w, 0., h, 1., -1.)
 }

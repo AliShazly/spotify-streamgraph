@@ -1,5 +1,11 @@
-use crate::{Line, Point, Primitive, Triangle};
+use crate::{Line, Point, Triangle};
 use svgtypes::{PathParser, PathSegment, PathSegment::*};
+
+#[derive(Debug, Clone, Copy)]
+enum Primitive {
+    Point(Point),
+    Line(Line),
+}
 
 impl Point {
     fn lerp(&self, other: Self, t: f64) -> Self {
@@ -61,18 +67,15 @@ pub fn gen_mesh(top_line: &str, bot_line: &str) -> Result<(Vec<Triangle>, Vec<Li
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| format!("Path Parsing Error: {:?}", e))?;
 
-    assert!(top_segments.len() == bot_segments.len());
-
-    // sampling results in holes
-    // let top_points = sample_at_interval(&points_along_path(&top_segments, 50)?, 2.);
-    // let bot_points = sample_at_interval(&points_along_path(&bot_segments, 50)?, 2.);
-
-    let top_points = points_along_path(&top_segments, 50)?;
-    let bot_points = points_along_path(&bot_segments, 50)?;
+    let top_points = points_along_path(&top_segments, 10)?;
+    let bot_points = points_along_path(&bot_segments, 10)?;
 
     assert!(top_points.len() == bot_points.len());
 
-    let lines_and_points = pair_points(top_points.into_iter().zip(bot_points.into_iter()), 0.99);
+    let lines_and_points = pair_points(
+        top_points.into_iter().zip(bot_points.into_iter()),
+        f32::EPSILON as f64, // webgl represents points as f32
+    );
     let lines: Vec<Line> = find_chains(&lines_and_points)
         .into_iter()
         .flatten()
@@ -169,7 +172,6 @@ fn find_chains(primitives: &[Primitive]) -> Vec<Chain> {
         .collect()
 }
 
-// fn pair_points(top_points: &[Point], bottom_points: &[Point], dist_thresh: f64) -> Vec<Primitive> {
 fn pair_points(pairs: impl Iterator<Item = (Point, Point)>, dist_thresh: f64) -> Vec<Primitive> {
     pairs
         .map(|(top_pt, bottom_pt)| {
@@ -178,20 +180,6 @@ fn pair_points(pairs: impl Iterator<Item = (Point, Point)>, dist_thresh: f64) ->
             } else {
                 Primitive::Point(top_pt.average(bottom_pt))
             }
-        })
-        .collect()
-}
-
-// points must be sorted according to ascending x
-fn sample_at_interval(points: &[Point], interval: f64) -> Vec<Point> {
-    let min_x = points.iter().fold(f64::NAN, |acc, pt| acc.min(pt.x));
-    let max_x = points.iter().fold(f64::NAN, |acc, pt| acc.max(pt.x));
-    let n_samples = (max_x / interval).round() as i32;
-    (0..=n_samples)
-        .map(|i| {
-            let xval = (i as f64 * interval) + min_x;
-            let idx = norm(xval, min_x, max_x) * (points.len() - 1) as f64;
-            points[idx.round() as usize]
         })
         .collect()
 }
@@ -259,10 +247,6 @@ fn interpolate_segment(
         // apending dst_pt to make sure both t=0 and t=1 are returned
         .chain([dst_pt].into_iter())
         .collect())
-}
-
-fn norm(val: f64, min: f64, max: f64) -> f64 {
-    (val - min) / (max - min)
 }
 
 // cubic bezier interpolation
