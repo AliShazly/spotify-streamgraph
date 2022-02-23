@@ -39,6 +39,21 @@ impl<T, E: Display> ToJsError<T> for Result<T, E> {
 }
 
 #[wasm_bindgen]
+pub struct TriangulatedArea {
+    triangles: Vec<Triangle>,
+    lines: Vec<Line>,
+}
+
+#[wasm_bindgen]
+impl TriangulatedArea {
+    #[wasm_bindgen(constructor)]
+    pub fn new(top_line: &str, bot_line: &str) -> Result<TriangulatedArea, JsError> {
+        let (triangles, lines) = gen_mesh(top_line, bot_line).to_jserr()?;
+        Ok(TriangulatedArea { triangles, lines })
+    }
+}
+
+#[wasm_bindgen]
 pub struct WebglCtx {
     internal: WebglState,
 }
@@ -51,12 +66,12 @@ impl WebglCtx {
         Ok(WebglCtx { internal })
     }
 
-    pub fn add_area(&mut self, top_line: &str, bot_line: &str, color: &str) -> Result<(), JsError> {
+    pub fn add_area(&mut self, area: &TriangulatedArea, color: &str) -> Result<(), JsError> {
         let rgba = csscolorparser::parse(color).to_jserr()?.rgba_u8();
         let color_rgb = [rgba.0, rgba.1, rgba.2];
-        let (tris, lines) = gen_mesh(top_line, bot_line).to_jserr()?;
+        let TriangulatedArea { triangles, lines } = area;
         self.internal
-            .add_object(&tris, &lines, color_rgb)
+            .add_object(triangles, lines, color_rgb)
             .to_jserr()?;
         Ok(())
     }

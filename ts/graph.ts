@@ -1,6 +1,6 @@
 import { AppState } from './app';
 import * as d3 from 'd3';
-import { WebglCtx } from '../pkg';
+import { WebglCtx, TriangulatedArea } from '../pkg';
 
 const WIDTH = 1500;
 const HEIGHT = 500;
@@ -234,8 +234,10 @@ export function drawGraph(state: AppState) {
         const top: string = topLine.context(null)(d);
         const bot: string = bottomLine.context(null)(d);
         const color = node.attr('fill');
-        canvasCtx.add_area(top, bot, color);
-        offscreenCtx.add_area(top, bot, keyToColorIdMap.get(d.key));
+        const triangulated = new TriangulatedArea(top, bot);
+        canvasCtx.add_area(triangulated, color);
+        offscreenCtx.add_area(triangulated, keyToColorIdMap.get(d.key));
+        triangulated.free();
     });
     const t1 = performance.now();
     console.log(`triangulate took ${t1 - t0} milliseconds.`);
