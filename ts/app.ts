@@ -1,25 +1,6 @@
 import { initDropArea } from './file-upload';
 import { drawGraph } from './graph';
 
-export class AppState {
-    private static singleton: AppState;
-    constructor() {
-        if (AppState.singleton) {
-            return AppState.singleton;
-        }
-        AppState.singleton = this;
-    }
-
-    // no optional properties included
-    allTracks: TrackData[] = [];
-
-    // includes all optional properties
-    allExtTracks: TrackData[] = [];
-
-    // number of file readers currently open
-    readCount = 0;
-}
-
 export interface TrackData {
     trackName: string;
     artistName: string;
@@ -28,8 +9,13 @@ export interface TrackData {
     timestamp: number;
 }
 
-const state = new AppState();
-initDropArea(state);
-document.getElementById('button').addEventListener('click', () => {
-    drawGraph(state);
+initDropArea((tracks, extTracks) => {
+    document.getElementById('input-selection').style.display = 'none';
+    drawGraph(tracks, extTracks);
+});
+
+document.getElementById('sample-button').addEventListener('click', () => {
+    document.getElementById('input-selection').style.display = 'none';
+    // read local storage for sample data
+    // drawGraph(tracks,extTracks);
 });

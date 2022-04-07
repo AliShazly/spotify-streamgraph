@@ -1,21 +1,83 @@
+:root {
+    --button-width: 200px;
+    --button-border-radius: 20px;
+    --button-font-size: 14;
+    --text-color: white;
+    --accent-color: #25d865;
+    --bg-color: #222;
+}
+html {
+    font-family: 'Work Sans', sans-serif;
+}
+body {
+    background: var(--bg-color);
+}
+* {
+    color: var(--text-color);
+}
+text {
+    fill: var(--text-color);
+}
+
+#title {
+    font-size: 25px;
+}
+#content {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+}
+#input-selection {
+    margin: 10px;
+    display: flex;
+    flex-direction: row;
+    height: 100px;
+}
 #drop-area {
-    border: 2px dashed #ccc;
-    border-radius: 20px;
-    width: 480px;
-    height: 480px;
-    font-family: sans-serif;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    border: 2px dashed #ddd;
     cursor: pointer;
+    width: var(--button-width);
+    border-radius: var(--button-border-radius);
+    font-size: var(--button-font-size);
+    transition-duration: 0.1s;
+}
+#drop-area:hover {
+    border-color: var(--accent-color);
 }
 #drop-area.highlight {
-    border-color: purple;
+    border-color: var(--accent-color);
+}
+#drop-area-text {
+    text-align: center;
 }
 #drop-input {
     display: none;
 }
-#button {
-    margin-top: 10px;
-    width: 300px;
-    height: 50px;
+#or-text {
+    font-size: 35px;
+    font-weight: bold;
+    margin: 10px;
+    display: flex;
+    align-self: center;
+    text-align: center;
+}
+#sample-button {
+    border: 2px solid var(--accent-color);
+    background-color: var(--bg-color);
+    width: var(--button-width);
+    border-radius: var(--button-border-radius);
+    font-size: var(--button-font-size);
+    font-family: 'Work Sans', sans-serif;
+    transition-duration: 0.1s;
+    cursor: pointer;
+}
+#sample-button:hover {
+    background-color: var(--accent-color);
+    color: black;
 }
 #d3 {
     position: relative;
@@ -32,16 +94,17 @@
     pointer-events: none;
 }
 #selection {
-    stroke: black;
+    stroke: var(--text-color);
     stroke-width: 1px;
     pointer-events: none;
 }
 #mouseOverLine {
-    fill: white;
+    fill: var(--text-color);
     pointer-events: none;
 }
 #tooltip {
     font-size: 24;
+    font-weight: bold;
 }
 svg text {
     cursor: default;

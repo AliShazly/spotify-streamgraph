@@ -1,23 +1,41 @@
 <!DOCTYPE html>
 <html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;700&display=swap"
+            rel="stylesheet"
+        />
+        <link rel="stylesheet" href="main.css" />
+        <script type="module" src="bundle.js"></script>
+        <title>Spotify History</title>
+    </head>
 
-<head>
-    <link rel="stylesheet" href="main.css">
-    <meta charset="UTF-8">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <script type=module src=bundle.js></script>
-    <title>Document</title>
-</head>
+    <body>
+        <div id="content">
+            <div id="title">
+                <h1>Spotify History Streamgraph</h1>
+            </div>
 
-<body>
-    <h1>eyo</h1>
-    <div id="drop-area">
-        <input type="file" id="drop-input" multiple accept=".json" />
-   </div>
+            <div id="input-selection">
+                <div id="drop-area">
+                    <span id="drop-area-text">Use your own data</span>
+                    <input
+                        type="file"
+                        id="drop-input"
+                        multiple
+                        accept=".json"
+                    />
+                </div>
+                <span id="or-text">OR</span>
+                <button id="sample-button">Use sample data</button>
+            </div>
 
-    <button id="button">do it</button>
-    <div id="d3" />
-</body>
-
+            <div id="d3" />
+        </div>
+    </body>
 </html>

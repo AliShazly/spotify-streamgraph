@@ -101,11 +101,6 @@ pub fn wasm_init() {
 }
 
 fn pack_rgba(rgba: [u8; 4]) -> u32 {
-    let (r, g, b, a) = (
-        rgba[0] as u32,
-        rgba[1] as u32,
-        rgba[2] as u32,
-        rgba[3] as u32,
-    );
-    r << 24 | g << 16 | b << 8 | a
+    let rgba = rgba.map(|subpx| subpx as u32);
+    rgba[0] << 24 | rgba[1] << 16 | rgba[2] << 8 | rgba[3]
 }

@@ -1,4 +1,4 @@
-import { AppState, TrackData } from './app';
+import { TrackData } from './app';
 
 enum FileType {
     Extended,
@@ -6,7 +6,17 @@ enum FileType {
     Invalid
 }
 
-export function initDropArea(state: AppState) {
+interface Counter {
+    count: number;
+}
+
+export function initDropArea(
+    onUploadEnd: (allTracks: TrackData[], allExtTracks: TrackData[]) => void
+) {
+    const allTracks: TrackData[] = [];
+    const allExtTracks: TrackData[] = [];
+    const readCount: Counter = { count: 0 };
+
     const dropArea = document.getElementById('drop-area');
     ['dragenter', 'dragover', 'dragleave', 'drop'].forEach((eventName) => {
         dropArea.addEventListener(eventName, (ev) => {
@@ -15,23 +25,45 @@ export function initDropArea(state: AppState) {
         });
     });
     ['dragenter', 'dragover'].forEach((eventName) => {
-        dropArea.addEventListener(eventName, () => dropArea.classList.add('highlight'));
+        dropArea.addEventListener(eventName, () =>
+            dropArea.classList.add('highlight')
+        );
     });
     ['dragleave', 'drop'].forEach((eventName) => {
-        dropArea.addEventListener(eventName, () => dropArea.classList.remove('highlight'));
+        dropArea.addEventListener(eventName, () =>
+            dropArea.classList.remove('highlight')
+        );
     });
     dropArea.addEventListener('drop', (e: DragEvent) => {
         if (e.dataTransfer != null) {
             [...e.dataTransfer.items].forEach((item) => {
                 const entry = item.webkitGetAsEntry();
                 if (entry.isDirectory) {
-                    (entry as FileSystemDirectoryEntry).createReader().readEntries((entries) => {
-                        entries.forEach((dirEntry) => {
-                            (dirEntry as FileSystemFileEntry).file((f) => ingestFile(f, state));
+                    (entry as FileSystemDirectoryEntry)
+                        .createReader()
+                        .readEntries((entries) => {
+                            entries.forEach((dirEntry) => {
+                                (dirEntry as FileSystemFileEntry).file((f) =>
+                                    ingestFile(
+                                        f,
+                                        allTracks,
+                                        allExtTracks,
+                                        readCount,
+                                        onUploadEnd
+                                    )
+                                );
+                            });
                         });
-                    });
                 } else if (entry.isFile) {
-                    (entry as FileSystemFileEntry).file((f) => ingestFile(f, state));
+                    (entry as FileSystemFileEntry).file((f) =>
+                        ingestFile(
+                            f,
+                            allTracks,
+                            allExtTracks,
+                            readCount,
+                            onUploadEnd
+                        )
+                    );
                 }
             });
         }
@@ -43,7 +75,7 @@ export function initDropArea(state: AppState) {
         const files: FileList | null = (<HTMLInputElement>e.target).files;
         if (files != null) {
             [...files].forEach((f) => {
-                ingestFile(f, state);
+                ingestFile(f, allTracks, allExtTracks, readCount, onUploadEnd);
             });
         }
     });
@@ -59,7 +91,13 @@ function checkFilename(filename: string): FileType {
     return FileType.Invalid;
 }
 
-function ingestFile(file: File, state: AppState) {
+function ingestFile(
+    file: File,
+    allTracks: TrackData[],
+    allExtTracks: TrackData[],
+    readCount: Counter,
+    onUploadFinish: (allTracks: TrackData[], allExtTracks: TrackData[]) => void
+) {
     let isExtended: boolean;
     switch (checkFilename(file.name)) {
         case FileType.Extended: {
@@ -73,15 +111,20 @@ function ingestFile(file: File, state: AppState) {
         case FileType.Invalid:
             return;
     }
-    const tracks = isExtended ? state.allExtTracks : state.allTracks;
+    const tracks = isExtended ? allExtTracks : allTracks;
     const parseFn = isExtended ? parseExtTrackData : parseTrackData;
     const reader = new FileReader();
-    state.readCount++;
+    readCount.count++;
     reader.onloadend = () => {
-        parseFn(reader.result as string).forEach((track) => {
-            tracks.push(track);
-        });
-        state.readCount--;
+        parseFn(reader.result as string)
+            .filter((track) => track.msPlayed > 0 && track.timestamp > 0)
+            .forEach((track) => {
+                tracks.push(track);
+            });
+        readCount.count--;
+        if (readCount.count == 0) {
+            onUploadFinish(allTracks, allExtTracks);
+        }
     };
     reader.readAsText(file);
 }

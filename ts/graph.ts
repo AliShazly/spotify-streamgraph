@@ -1,11 +1,15 @@
-import { AppState } from './app';
+import { TrackData } from './app';
 import * as d3 from 'd3';
 import { WebglCtx, TriangulatedArea } from '../pkg';
+
+const SECOND = 1000;
+const MINUTE = SECOND * 60;
 
 const WIDTH = 1500;
 const HEIGHT = 500;
 const SELECTION_STROKE_W = 1.5;
 const OVERLAY_LINE_W = 2;
+const TRANSITION_DUR = SECOND * 0.8;
 
 interface ScoresAtTime {
     scores: {
@@ -25,7 +29,10 @@ interface PopularityOverTime {
     keys: string[];
 }
 
-function popularityOverTime(tracks: RawDataPoint[], timeStepMs: number): PopularityOverTime {
+function popularityOverTime(
+    tracks: RawDataPoint[],
+    timeStepMs: number
+): PopularityOverTime {
     if (tracks.length == 0) {
         return {
             scores: [],
@@ -46,8 +53,13 @@ function popularityOverTime(tracks: RawDataPoint[], timeStepMs: number): Popular
             timestamp: sortedTracks[lastIdx].timestamp
         };
 
-        for (const [idx, track] of sortedTracks.slice(lastIdx, undefined).entries()) {
-            if (track.timestamp >= currentTime && track.timestamp <= currentTime + timeStepMs) {
+        for (const [idx, track] of sortedTracks
+            .slice(lastIdx, undefined)
+            .entries()) {
+            if (
+                track.timestamp >= currentTime &&
+                track.timestamp <= currentTime + timeStepMs
+            ) {
                 chunkScores.scores[track.key] += track.score;
             } else {
                 lastIdx += idx;
@@ -76,7 +88,10 @@ function color2hex(color: number[]): string {
 }
 
 function randColor(): string {
-    return '#' + (0x1000000 + Math.random() * 0xffffff).toString(16).substring(1, 7);
+    return (
+        '#' +
+        (0x1000000 + Math.random() * 0xffffff).toString(16).substring(1, 7)
+    );
 }
 
 function clamp(val: number, min: number, max: number): number {
@@ -95,15 +110,10 @@ function unpackRgba(color: number): number[] {
     return [r, g, b, a];
 }
 
-export function drawGraph(state: AppState) {
-    if (state.readCount != 0) {
-        alert('Reading files');
-        return;
-    }
-
+export function drawGraph(allTracks: TrackData[], allExtTracks: TrackData[]) {
     // if both extended and regular track data are uploaded, use the one with more entries
     const rawData: RawDataPoint[] = (
-        state.allExtTracks.length > state.allTracks.length ? state.allExtTracks : state.allTracks
+        allExtTracks.length > allTracks.length ? allExtTracks : allTracks
     )
         .map((d) => ({
             key: d.artistName,
@@ -111,9 +121,12 @@ export function drawGraph(state: AppState) {
             timestamp: d.timestamp
         }))
         .sort((a, b) => a.timestamp - b.timestamp);
-    const popularity = popularityOverTime(rawData, 2629800000);
+    const popularity = popularityOverTime(
+        rawData,
+        2629800000 /* ~1 month, gives nice results */
+    );
 
-    // formatted like https://github.com/d3/d3-shape#stack
+    // dataPoint formatted like https://github.com/d3/d3-shape#stack
     // interface {
     //     [key: string]: number;
     //     __timestamp: number;
@@ -155,8 +168,11 @@ export function drawGraph(state: AppState) {
         keyToColorIdMap.set(key, color);
         colorIdToKeyMap.set(color, key);
     });
-
-    const stack = d3.stack().offset(d3.stackOffsetWiggle).order(d3.stackOrderInsideOut).keys(keys);
+    const stack = d3
+        .stack()
+        .offset(d3.stackOffsetWiggle)
+        .order(d3.stackOrderInsideOut)
+        .keys(keys);
     const stackedData = stack(data);
     const dataLookup = new Map();
     stackedData.forEach((datum) => {
@@ -175,7 +191,7 @@ export function drawGraph(state: AppState) {
         .scaleTime()
         .domain(d3.extent(data, (d) => new Date(d.__timestamp)))
         .range([0, WIDTH]);
-    const xAxis = d3.axisBottom(x).ticks(d3.timeYear.every(1));
+    const xAxis = d3.axisBottom(x);
     const y = d3
         .scaleLinear()
         .domain([
@@ -184,20 +200,35 @@ export function drawGraph(state: AppState) {
         ])
         .range([HEIGHT, 0]);
 
-    const firstListenedColor = (key: string) => {
+    // TODO: speed this up
+    const firstListenedColor = (
+        key: string,
+        minAcceptedScore: number,
+        colorNoiseAmt: number
+    ) => {
         const lowestTs = rawData[0].timestamp;
         const highestTs = rawData[rawData.length - 1].timestamp;
-        const firstListenedTs = rawData.find((datum) => datum.key == key).timestamp;
+        const firstListened = rawData.find(
+            (datum) => datum.key == key && datum.score > minAcceptedScore
+        );
+
+        // if we don't find an entry with a score > minAcceptedScore, find the first occurrence of the key regardless of score
+        const firstListenedTs = firstListened
+            ? firstListened.timestamp
+            : rawData.find((datum) => datum.key == key).timestamp;
+
         const normTs = (firstListenedTs - lowestTs) / (highestTs - lowestTs);
+        const noise = (Math.random() - 0.5) * 2 * colorNoiseAmt;
+
         // return d3.interpolateRdYlGn(normTs);
-        return d3.interpolateRainbow(normTs);
+        return d3.interpolateRainbow(normTs + noise);
         // return d3.interpolateTurbo(normTs);
         // return d3.interpolateCool(normTs);
     };
     const color = d3
         .scaleOrdinal()
         .domain(keys)
-        .range(keys.map((k) => firstListenedColor(k)));
+        .range(keys.map((k) => firstListenedColor(k, MINUTE, 0.04)));
 
     const area = d3
         .area()
@@ -251,7 +282,10 @@ export function drawGraph(state: AppState) {
         .attr('mask', 'url(#lineMask)');
     const lineMask = overlay.append('mask').attr('id', 'lineMask');
 
-    const zoomRect = overlay.append('rect').attr('id', 'zoomRect').attr('visibility', 'hidden');
+    const zoomRect = overlay
+        .append('rect')
+        .attr('id', 'zoomRect')
+        .attr('visibility', 'hidden');
 
     const tooltip = overlay
         .append('text')
@@ -259,12 +293,13 @@ export function drawGraph(state: AppState) {
         .attr('x', 50)
         .attr('y', 50)
         .attr('visibility', 'hidden');
+    const tooltipArtist = tooltip.append('tspan').attr('x', 50).attr('dy', 0);
+    const tooltipDate = tooltip
+        .append('tspan')
+        .attr('x', 50)
+        .attr('dy', '1.2em');
 
-    const gX = overlay
-        .append('g')
-        .attr('id', 'xAxis')
-        .attr('transform', `translate(0,${HEIGHT - 25})`)
-        .call(xAxis);
+    const gX = overlay.append('g').attr('id', 'xAxis').call(xAxis);
 
     const zoom = d3
         .zoom()
@@ -274,9 +309,6 @@ export function drawGraph(state: AppState) {
             [0, 0],
             [WIDTH, HEIGHT]
         ])
-        .on('start', () => {
-            d3.selectAll('.areaLabel').remove();
-        })
         .on('zoom', ({ transform }) => {
             gX.call(xAxis.scale(transform.rescaleX(x)));
 
@@ -289,10 +321,16 @@ export function drawGraph(state: AppState) {
             mouseOverLine.attr('width', OVERLAY_LINE_W * transform.k);
         })
         .on('end', ({ transform }) => {
+            if (transform.k > 2) {
+                gX.call(xAxis.ticks(d3.timeMonth.every(1)));
+            }
+            //  else {
+            //     gX.call(xAxis.ticks(d3.timeMonth.every(2)));
+            // }
+
             offscreenCtx.set_transform(transform.x, transform.y, transform.k);
             offscreenCtx.draw();
         });
-    canvas.call(<any>zoom.transform, d3.zoomIdentity);
 
     let selectedKey: string | null = null;
     let [zoomRectInitX, zoomRectInitY] = [0, 0];
@@ -313,17 +351,35 @@ export function drawGraph(state: AppState) {
                 const zoomedX = curTransform.invertX(mouseX);
                 const fltIdx = (zoomedX / WIDTH) * (data.length - 1);
                 if (fltIdx >= 0 && fltIdx <= data.length - 1) {
+                    const lerpAmt = fltIdx - Math.floor(fltIdx);
+
                     const minsListened = Math.round(
                         lerp(
                             data[Math.floor(fltIdx)][selectedKey],
                             data[Math.ceil(fltIdx)][selectedKey],
-                            fltIdx - Math.floor(fltIdx)
-                        ) / 60_000
+                            lerpAmt
+                        ) / MINUTE
                     );
-                    // TODO: display in hrs/mins/secs
-                    tooltip.text(`${selectedKey} : ${minsListened}`);
+
+                    const lerpDate = new Date(
+                        lerp(
+                            data[Math.floor(fltIdx)].__timestamp,
+                            data[Math.ceil(fltIdx)].__timestamp,
+                            lerpAmt
+                        )
+                    );
+
+                    tooltipArtist.text(
+                        `${selectedKey} : ${(minsListened / 60).toFixed(
+                            2
+                        )}hrs listened`
+                    );
+                    tooltipDate.text(`Around ${lerpDate.toDateString()}`);
                 }
-                mouseOverLine.attr('x', mouseX - +mouseOverLine.attr('width') / 2);
+                mouseOverLine.attr(
+                    'x',
+                    mouseX - +mouseOverLine.attr('width') / 2
+                );
             }
             if (ev.buttons > 0) {
                 const [mouseX, mouseY] = d3.pointer(ev, overlay.node());
@@ -354,7 +410,10 @@ export function drawGraph(state: AppState) {
 
                 const lookupColor = color2hex(
                     unpackRgba(
-                        offscreenCtx.get_pixel(Math.round(mouseX), Math.round(mouseY))
+                        offscreenCtx.get_pixel(
+                            Math.round(mouseX),
+                            Math.round(mouseY)
+                        )
                     ).slice(0, 3)
                 );
 
@@ -365,9 +424,12 @@ export function drawGraph(state: AppState) {
                     selectedKey = keyFromColor;
                     canvas.style('opacity', 0.5);
                     tooltip.attr('visibility', 'visible');
-                    tooltip.text(selectedKey);
+                    tooltipArtist.text(selectedKey);
                     mouseOverLine.attr('visibility', 'visible');
-                    mouseOverLine.attr('x', mouseX - +mouseOverLine.attr('width') / 2);
+                    mouseOverLine.attr(
+                        'x',
+                        mouseX - +mouseOverLine.attr('width') / 2
+                    );
                     const datum = dataLookup.get(selectedKey);
                     selectionGroup
                         .append('path')
@@ -375,7 +437,10 @@ export function drawGraph(state: AppState) {
                         .classed('selectedArea', true)
                         .style('fill', (d) => String(color(d.key)))
                         .attr('d', area.context(null))
-                        .attr('stroke-width', SELECTION_STROKE_W / curTransform.k)
+                        .attr(
+                            'stroke-width',
+                            SELECTION_STROKE_W / curTransform.k
+                        )
                         .attr('transform', <any>curTransform);
                     lineMask
                         .append('path')
@@ -384,26 +449,42 @@ export function drawGraph(state: AppState) {
                         .attr('fill', 'white')
                         .attr('stroke', 'black')
                         .attr('d', area.context(null))
-                        .attr('stroke-width', SELECTION_STROKE_W / curTransform.k)
+                        .attr(
+                            'stroke-width',
+                            SELECTION_STROKE_W / curTransform.k
+                        )
                         .attr('transform', <any>curTransform);
                 }
                 return;
             }
 
             // if we're already zoomed in, reset zoom
-            if (curTransform.x != 0 || curTransform.y != 0 || curTransform.k != 1) {
+            if (
+                curTransform.x != 0 ||
+                curTransform.y != 0 ||
+                curTransform.k != 1
+            ) {
                 canvas
                     .transition()
-                    .duration(1000)
-                    .call(<any>zoom.transform, d3.zoomIdentity);
+                    .duration(TRANSITION_DUR)
+                    .call(<any>zoom.transform, d3.zoomIdentity)
+                    .on('start', () => {
+                        gX.call(xAxis.ticks(d3.timeMonth.every(2)));
+                    });
             }
             // else, perform zoom
             else {
-                // TODO: impl zooming when already zoomed in, based on curTransform
-                const scale = 1 / ((zoomWidth * zoomHeight) / (WIDTH * HEIGHT));
+                const scale =
+                    1 / Math.max(zoomWidth / WIDTH, zoomHeight / HEIGHT);
                 const [svgCenterX, svgCenterY] = [WIDTH / 2, HEIGHT / 2];
-                const [zoomCenterX, zoomCenterY] = [zoomX + zoomWidth / 2, zoomY + zoomHeight / 2];
-                const [relX, relY] = [svgCenterX - zoomCenterX, svgCenterY - zoomCenterY];
+                const [zoomCenterX, zoomCenterY] = [
+                    zoomX + zoomWidth / 2,
+                    zoomY + zoomHeight / 2
+                ];
+                const [relX, relY] = [
+                    svgCenterX - zoomCenterX,
+                    svgCenterY - zoomCenterY
+                ];
                 const transform = d3.zoomIdentity
                     //https://stackoverflow.com/questions/43184515/d3-js-v4-zoom-to-chart-center-not-mouse-position
                     .translate(
@@ -414,12 +495,15 @@ export function drawGraph(state: AppState) {
                     .translate(relX, relY);
                 canvas
                     .transition()
-                    .duration(1000)
+                    .duration(TRANSITION_DUR)
                     .call(<any>zoom.transform, transform)
                     .on('end', () => {
                         //TODO: force redraw of overlay (in firefox only?)
                     });
             }
         })
-        .on('mouseout', () => tooltip.text(selectedKey));
+        .on('mouseout', () => tooltipArtist.text(selectedKey));
+
+    // draws initial graph, redrawn on every zoom event
+    canvas.call(<any>zoom.transform, d3.zoomIdentity);
 }

@@ -19,6 +19,7 @@
         "build": "webpack",
         "watch": "cargo watch -w ./src -w ./ts -- npm run build",
         "start-server": "cd ./public && wasm-server",
-        "serve": "npm-run-all --parallel watch start-server"
+        "serve": "npm run build && npm run start-server",
+        "dev": "npm-run-all --parallel watch start-server"
     }
 }
