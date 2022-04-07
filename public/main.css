@@ -19,14 +19,18 @@ text {
     fill: var(--text-color);
 }
 
-#title {
-    font-size: 25px;
-}
 #content {
     display: flex;
     justify-content: center;
     align-items: center;
     flex-direction: column;
+}
+#title {
+    font-size: 25px;
+}
+#loading-text {
+    font-size: 35px;
+    display: none;
 }
 #input-selection {
     margin: 10px;
