@@ -372,9 +372,14 @@ export function drawGraph(allTracks: TrackData[], allExtTracks: TrackData[]) {
                     tooltipArtist.text(
                         `${selectedKey} : ${(minsListened / 60).toFixed(
                             2
-                        )}hrs listened`
+                        )} hours listened`
                     );
-                    tooltipDate.text(`Around ${lerpDate.toDateString()}`);
+                    tooltipDate.text(
+                        `Around ${lerpDate.toLocaleString('default', {
+                            month: 'long',
+                            year: 'numeric'
+                        })}`
+                    );
                 }
                 mouseOverLine.attr(
                     'x',
