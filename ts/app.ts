@@ -12,10 +12,10 @@ export interface TrackData {
 initDropArea((tracks, extTracks) => {
     document.getElementById('input-selection').style.display = 'none';
     const loadingText = document.getElementById('loading-text');
-    loadingText.style.display = 'inline';
+    loadingText.classList.add('show');
     setTimeout(() => {
         drawGraph(tracks, extTracks);
-        loadingText.style.display = 'none';
+        loadingText.classList.remove('show');
     }, 0);
 });
 
@@ -26,7 +26,7 @@ document.getElementById('sample-button').addEventListener('click', () => {
         .then((res) => {
             if (res.ok) {
                 inputSelection.style.display = 'none';
-                loadingText.style.display = 'inline';
+                loadingText.classList.add('show');
                 return res.json();
             } else {
                 return Promise.reject();
@@ -34,6 +34,6 @@ document.getElementById('sample-button').addEventListener('click', () => {
         })
         .then((extTracks) => {
             drawGraph([], extTracks);
-            loadingText.style.display = 'none';
+            loadingText.classList.remove('show');
         });
 });

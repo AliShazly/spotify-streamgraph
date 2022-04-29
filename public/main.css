@@ -1,12 +1,13 @@
 :root {
     --button-border-radius: 20px;
-    --button-font-size: 14;
+    --button-font-size: 1rem;
     --text-color: white;
     --accent-color: #25d865;
     --bg-color: #222;
 }
 html {
     font-family: 'Work Sans', sans-serif;
+    -webkit-tap-highlight-color: transparent;
 }
 body {
     background: var(--bg-color);
@@ -17,25 +18,24 @@ body {
 text {
     fill: var(--text-color);
 }
-
-#content {
+#title {
+    font-size: 1.7rem;
     display: flex;
     justify-content: center;
-    align-items: center;
-    flex-direction: column;
-}
-#title {
-    font-size: 25px;
 }
 #loading-text {
-    font-size: 35px;
+    font-size: 1.5rem;
     display: none;
+    justify-content: center;
+}
+#loading-text.show {
+    display: flex;
 }
 #input-selection {
-    margin: 10px;
+    margin: 0 auto;
     display: flex;
     flex-direction: row;
-    height: 100px;
+    max-width: 500px;
 }
 #drop-area {
     display: flex;
@@ -61,7 +61,7 @@ text {
     display: none;
 }
 #or-text {
-    font-size: 35px;
+    font-size: 2rem;
     font-weight: bold;
     margin: 20px;
     display: flex;
@@ -87,8 +87,12 @@ text {
     background-color: var(--accent-color);
     color: black;
 }
+#d3-container {
+    display: flex;
+}
 #d3 {
     position: relative;
+    margin: auto;
 }
 #overlay {
     position: absolute;
@@ -111,7 +115,7 @@ text {
     pointer-events: none;
 }
 #tooltip {
-    font-size: 24;
+    font-size: 1rem;
     font-weight: bold;
 }
 svg text {

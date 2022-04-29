@@ -5,8 +5,6 @@ import { WebglCtx, TriangulatedArea } from '../pkg';
 const SECOND = 1000;
 const MINUTE = SECOND * 60;
 
-const WIDTH = 1500;
-const HEIGHT = 500;
 const SELECTION_STROKE_W = 1.5;
 const OVERLAY_LINE_W = 2;
 const TRANSITION_DUR = SECOND * 0.8;
@@ -111,6 +109,9 @@ function unpackRgba(color: number): number[] {
 }
 
 export function drawGraph(allTracks: TrackData[], allExtTracks: TrackData[]) {
+    const WIDTH = Math.floor(window.innerWidth * 0.9);
+    const HEIGHT = Math.floor(WIDTH / 3);
+
     // if both extended and regular track data are uploaded, use the one with more entries
     const rawData: RawDataPoint[] = (
         allExtTracks.length > allTracks.length ? allExtTracks : allTracks
@@ -137,8 +138,6 @@ export function drawGraph(allTracks: TrackData[], allExtTracks: TrackData[]) {
         return dataPoint;
     });
     const keys = popularity.keys;
-
-    console.log(keys, data);
 
     // TODO: margin: https://bl.ocks.org/mbostock/3019563
 
@@ -273,31 +272,128 @@ export function drawGraph(allTracks: TrackData[], allExtTracks: TrackData[]) {
     const t1 = performance.now();
     console.log(`triangulate took ${t1 - t0} milliseconds.`);
 
-    const mouseOverLine = overlay
+    const lineGroup = overlay.append('g');
+    const lineMask = lineGroup.append('mask').attr('id', 'lineMask');
+    const mouseOverLine = lineGroup
         .append('rect')
         .attr('id', 'mouseOverLine')
         .attr('visibility', 'hidden')
         .attr('height', HEIGHT)
         .attr('width', OVERLAY_LINE_W)
         .attr('mask', 'url(#lineMask)');
-    const lineMask = overlay.append('mask').attr('id', 'lineMask');
 
     const zoomRect = overlay
         .append('rect')
         .attr('id', 'zoomRect')
         .attr('visibility', 'hidden');
 
+    const tooltipBump = WIDTH * 0.05;
+    const tooltipBg = overlay
+        .append('rect')
+        .attr('id', 'tooltipBg')
+        .attr('visibility', 'hidden');
     const tooltip = overlay
         .append('text')
         .attr('id', 'tooltip')
-        .attr('x', 50)
-        .attr('y', 50)
+        .attr('x', tooltipBump)
+        .attr('y', tooltipBump + 20 /*a little over 1em*/)
         .attr('visibility', 'hidden');
-    const tooltipArtist = tooltip.append('tspan').attr('x', 50).attr('dy', 0);
+    const tooltipArtist = tooltip
+        .append('tspan')
+        .attr('x', tooltipBump)
+        .attr('dy', 0);
     const tooltipDate = tooltip
         .append('tspan')
-        .attr('x', 50)
+        .attr('x', tooltipBump)
         .attr('dy', '1.2em');
+
+    const updateTooltipBg = () => {
+        const bbox = tooltip.node().getBBox();
+        tooltipBg
+            .attr('x', bbox.x - 5)
+            .attr('y', bbox.y - 5)
+            .attr('width', bbox.width + 10)
+            .attr('height', bbox.height + 10)
+            .attr('fill', '#000')
+            .attr('fill-opacity', 0.7);
+    };
+
+    const updateSelectionOverlay = (
+        key: string,
+        mouseX: number,
+        curTransform: d3.ZoomTransform
+    ) => {
+        mouseOverLine.attr('visibility', 'visible'); // hidden on each mouseOut
+
+        const zoomedX = curTransform.invertX(mouseX);
+        const fltIdx = (zoomedX / WIDTH) * (data.length - 1);
+        if (fltIdx >= 0 && fltIdx <= data.length - 1) {
+            const lerpAmt = fltIdx - Math.floor(fltIdx);
+
+            const minsListened = Math.round(
+                lerp(
+                    data[Math.floor(fltIdx)][key],
+                    data[Math.ceil(fltIdx)][key],
+                    lerpAmt
+                ) / MINUTE
+            );
+
+            const lerpDate = new Date(
+                lerp(
+                    data[Math.floor(fltIdx)].__timestamp,
+                    data[Math.ceil(fltIdx)].__timestamp,
+                    lerpAmt
+                )
+            );
+
+            tooltipArtist.text(
+                `${key} : ${(minsListened / 60).toFixed(2)} hours listened`
+            );
+            tooltipDate.text(
+                `Around ${lerpDate.toLocaleString('default', {
+                    month: 'long',
+                    year: 'numeric'
+                })}`
+            );
+
+            updateTooltipBg();
+        }
+        mouseOverLine.attr('x', zoomedX - +mouseOverLine.attr('width') / 2);
+    };
+
+    const removeSelectionOverlay = () => {
+        canvas.style('opacity', 1);
+        tooltip.attr('visibility', 'hidden');
+        mouseOverLine.attr('visibility', 'hidden');
+        tooltipBg.attr('visibility', 'hidden');
+        selectionGroup.selectAll('path').remove();
+        lineMask.selectAll('path').remove();
+    };
+
+    const createSelectionOverlay = (
+        key: string,
+        mouseX: number,
+        curTransform: d3.ZoomTransform
+    ) => {
+        canvas.style('opacity', 0.5);
+        tooltip.attr('visibility', 'visible');
+        tooltipBg.attr('visibility', 'visible');
+        updateSelectionOverlay(key, mouseX, curTransform);
+        const datum = dataLookup.get(key);
+        selectionGroup
+            .append('path')
+            .data([datum])
+            .style('fill', (d) => String(color(d.key)))
+            .attr('d', area.context(null))
+            .attr('stroke-width', SELECTION_STROKE_W / curTransform.k)
+            .attr('transform', <any>curTransform);
+        lineMask
+            .append('path')
+            .data([datum])
+            .attr('fill', 'white')
+            .attr('d', area.context(null))
+            .attr('stroke-width', SELECTION_STROKE_W / curTransform.k);
+    };
 
     const gX = overlay.append('g').attr('id', 'xAxis').call(xAxis);
 
@@ -315,19 +411,15 @@ export function drawGraph(allTracks: TrackData[], allExtTracks: TrackData[]) {
             canvasCtx.set_transform(transform.x, transform.y, transform.k);
             canvasCtx.draw();
 
-            d3.selectAll('.selectedArea')
+            selectionGroup
+                .selectAll('path')
                 .attr('transform', transform)
                 .attr('stroke-width', SELECTION_STROKE_W / transform.k);
+
+            lineGroup.attr('transform', transform);
             mouseOverLine.attr('width', OVERLAY_LINE_W * transform.k);
         })
         .on('end', ({ transform }) => {
-            if (transform.k > 2) {
-                gX.call(xAxis.ticks(d3.timeMonth.every(1)));
-            }
-            //  else {
-            //     gX.call(xAxis.ticks(d3.timeMonth.every(2)));
-            // }
-
             offscreenCtx.set_transform(transform.x, transform.y, transform.k);
             offscreenCtx.draw();
         });
@@ -335,8 +427,8 @@ export function drawGraph(allTracks: TrackData[], allExtTracks: TrackData[]) {
     let selectedKey: string | null = null;
     let [zoomRectInitX, zoomRectInitY] = [0, 0];
     overlay
-        .on('mousedown', (ev) => {
-            [zoomRectInitX, zoomRectInitY] = d3.pointer(ev, overlay.node());
+        .on('mousedown touchstart', (ev) => {
+            [[zoomRectInitX, zoomRectInitY]] = d3.pointers(ev, overlay.node());
             zoomRect
                 .attr('visibility', 'visible')
                 .attr('x', zoomRectInitX)
@@ -344,60 +436,32 @@ export function drawGraph(allTracks: TrackData[], allExtTracks: TrackData[]) {
                 .attr('width', 0)
                 .attr('height', 0);
         })
-        .on('mousemove', (ev) => {
-            if (selectedKey != null) {
-                const curTransform = d3.zoomTransform(canvas.node() as Element);
-                const mouseX = d3.pointer(ev, overlay.node())[0];
-                const zoomedX = curTransform.invertX(mouseX);
-                const fltIdx = (zoomedX / WIDTH) * (data.length - 1);
-                if (fltIdx >= 0 && fltIdx <= data.length - 1) {
-                    const lerpAmt = fltIdx - Math.floor(fltIdx);
-
-                    const minsListened = Math.round(
-                        lerp(
-                            data[Math.floor(fltIdx)][selectedKey],
-                            data[Math.ceil(fltIdx)][selectedKey],
-                            lerpAmt
-                        ) / MINUTE
-                    );
-
-                    const lerpDate = new Date(
-                        lerp(
-                            data[Math.floor(fltIdx)].__timestamp,
-                            data[Math.ceil(fltIdx)].__timestamp,
-                            lerpAmt
-                        )
-                    );
-
-                    tooltipArtist.text(
-                        `${selectedKey} : ${(minsListened / 60).toFixed(
-                            2
-                        )} hours listened`
-                    );
-                    tooltipDate.text(
-                        `Around ${lerpDate.toLocaleString('default', {
-                            month: 'long',
-                            year: 'numeric'
-                        })}`
-                    );
-                }
-                mouseOverLine.attr(
-                    'x',
-                    mouseX - +mouseOverLine.attr('width') / 2
-                );
-            }
-            if (ev.buttons > 0) {
-                const [mouseX, mouseY] = d3.pointer(ev, overlay.node());
+        .on('mousemove touchmove', (ev) => {
+            const isPressed = ev.type === 'touchmove' || ev.buttons > 0;
+            if (isPressed) {
+                const [[mouseX, mouseY]] = d3.pointers(ev, overlay.node());
                 zoomRect
                     .attr('x', Math.min(zoomRectInitX, mouseX))
                     .attr('y', Math.min(zoomRectInitY, mouseY))
                     .attr('width', Math.abs(zoomRectInitX - mouseX))
                     .attr('height', Math.abs(zoomRectInitY - mouseY));
+            } else if (selectedKey != null) {
+                const curTransform = d3.zoomTransform(canvas.node() as Element);
+                const mouseX = d3.pointers(ev, overlay.node())[0][0];
+                updateSelectionOverlay(selectedKey, mouseX, curTransform);
             }
         })
-        .on('mouseup', (ev) => {
+        .on('mouseup touchend', (ev) => {
+            if (ev.type === 'touchend') {
+                ev.preventDefault();
+            }
+
             zoomRect.attr('visibility', 'hidden');
-            const [mouseX, mouseY] = d3.pointer(ev, overlay.node());
+
+            const [mouseX, mouseY] =
+                ev.type === 'touchend'
+                    ? d3.pointer(ev.changedTouches[0], overlay.node())
+                    : d3.pointer(ev, overlay.node());
             const curTransform = d3.zoomTransform(canvas.node() as Element);
             const [zoomX, zoomY, zoomWidth, zoomHeight] = [
                 +zoomRect.attr('x'),
@@ -408,57 +472,22 @@ export function drawGraph(allTracks: TrackData[], allExtTracks: TrackData[]) {
 
             // on a click
             if (zoomWidth == 0 || zoomHeight == 0) {
-                canvas.style('opacity', 1);
-                tooltip.attr('visibility', 'hidden');
-                mouseOverLine.attr('visibility', 'hidden');
-                d3.selectAll('.selectedArea').remove();
-
-                const lookupColor = color2hex(
-                    unpackRgba(
-                        offscreenCtx.get_pixel(
-                            Math.round(mouseX),
-                            Math.round(mouseY)
-                        )
-                    ).slice(0, 3)
+                removeSelectionOverlay();
+                const keyFromColor = colorIdToKeyMap.get(
+                    color2hex(
+                        unpackRgba(
+                            offscreenCtx.get_pixel(
+                                Math.round(mouseX),
+                                Math.round(mouseY)
+                            )
+                        ).slice(0, 3)
+                    )
                 );
-
-                const keyFromColor = colorIdToKeyMap.get(lookupColor);
-                if (keyFromColor == selectedKey || keyFromColor == undefined) {
-                    selectedKey = null;
-                } else {
+                if (keyFromColor != undefined) {
+                    createSelectionOverlay(keyFromColor, mouseX, curTransform);
                     selectedKey = keyFromColor;
-                    canvas.style('opacity', 0.5);
-                    tooltip.attr('visibility', 'visible');
-                    tooltipArtist.text(selectedKey);
-                    mouseOverLine.attr('visibility', 'visible');
-                    mouseOverLine.attr(
-                        'x',
-                        mouseX - +mouseOverLine.attr('width') / 2
-                    );
-                    const datum = dataLookup.get(selectedKey);
-                    selectionGroup
-                        .append('path')
-                        .data([datum])
-                        .classed('selectedArea', true)
-                        .style('fill', (d) => String(color(d.key)))
-                        .attr('d', area.context(null))
-                        .attr(
-                            'stroke-width',
-                            SELECTION_STROKE_W / curTransform.k
-                        )
-                        .attr('transform', <any>curTransform);
-                    lineMask
-                        .append('path')
-                        .data([datum])
-                        .classed('selectedArea', true)
-                        .attr('fill', 'white')
-                        .attr('stroke', 'black')
-                        .attr('d', area.context(null))
-                        .attr(
-                            'stroke-width',
-                            SELECTION_STROKE_W / curTransform.k
-                        )
-                        .attr('transform', <any>curTransform);
+                } else {
+                    selectedKey = null;
                 }
                 return;
             }
@@ -472,10 +501,7 @@ export function drawGraph(allTracks: TrackData[], allExtTracks: TrackData[]) {
                 canvas
                     .transition()
                     .duration(TRANSITION_DUR)
-                    .call(<any>zoom.transform, d3.zoomIdentity)
-                    .on('start', () => {
-                        gX.call(xAxis.ticks(d3.timeMonth.every(2)));
-                    });
+                    .call(<any>zoom.transform, d3.zoomIdentity);
             }
             // else, perform zoom
             else {
@@ -507,7 +533,12 @@ export function drawGraph(allTracks: TrackData[], allExtTracks: TrackData[]) {
                     });
             }
         })
-        .on('mouseout', () => tooltipArtist.text(selectedKey));
+        .on('mouseout', () => {
+            tooltipArtist.text(selectedKey);
+            tooltipDate.text('');
+            mouseOverLine.attr('visibility', 'hidden');
+            updateTooltipBg();
+        });
 
     // draws initial graph, redrawn on every zoom event
     canvas.call(<any>zoom.transform, d3.zoomIdentity);
