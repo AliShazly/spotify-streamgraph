@@ -1,4 +1,6 @@
-# [spotify-streamgraph](https://alishazly.com/spotify)
+# spotify-streamgraph
+
+https://alishazly.com/spotify
 
 Creates a [streamgraph](https://en.wikipedia.org/wiki/Streamgraph) based off of your spotify listening history using d3 & webgl.
 
